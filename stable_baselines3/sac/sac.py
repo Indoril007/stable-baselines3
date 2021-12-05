@@ -199,6 +199,8 @@ class SAC(OffPolicyAlgorithm):
 
         ent_coef_losses, ent_coefs = [], []
         actor_losses, critic_losses = [], []
+        critic_values = []
+        target_critic_values = []
 
         for gradient_step in range(gradient_steps):
             # Sample replay buffer
@@ -251,6 +253,17 @@ class SAC(OffPolicyAlgorithm):
             critic_loss = 0.5 * sum(F.mse_loss(current_q, target_q_values) for current_q in current_q_values)
             critic_losses.append(critic_loss.item())
 
+            critic_values.append(
+                th.min(
+                    th.cat(current_q_values, dim=1), dim=1
+                )[0].mean().item()
+            )
+
+            target_critic_values.append(
+                target_q_values.mean().item()
+            )
+
+
             # Optimize the critic
             self.critic.optimizer.zero_grad()
             critic_loss.backward()
@@ -279,6 +292,8 @@ class SAC(OffPolicyAlgorithm):
         self.logger.record("train/ent_coef", np.mean(ent_coefs))
         self.logger.record("train/actor_loss", np.mean(actor_losses))
         self.logger.record("train/critic_loss", np.mean(critic_losses))
+        self.logger.record("train/current_q_values", np.mean(critic_values))
+        self.logger.record("train/target_q_values", np.mean(target_critic_values))
         self.logger.record("train/buffer_size",
                            self.replay_buffer.size())
         if len(ent_coef_losses) > 0:
