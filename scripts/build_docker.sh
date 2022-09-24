@@ -16,7 +16,7 @@ else
 fi
 
 echo "docker build --build-arg PARENT_IMAGE=${PARENT} --build-arg PYTORCH_DEPS=${PYTORCH_DEPS} -t ${TAG}:${VERSION} ."
-docker build --build-arg PARENT_IMAGE=${PARENT} --build-arg PYTORCH_DEPS=${PYTORCH_DEPS} -t ${TAG}:${VERSION} .
+docker build --build-arg PARENT_IMAGE=${PARENT} --build-arg PYTORCH_DEPS=${PYTORCH_DEPS} --build-arg PYTHON_VERSION=3.8 -t ${TAG}:${VERSION} .
 docker tag ${TAG}:${VERSION} ${TAG}:latest
 
 if [[ ${RELEASE} == "True" ]]; then

@@ -200,6 +200,8 @@ class SAC(OffPolicyAlgorithm):
         ent_coef_losses, ent_coefs = [], []
         actor_losses, critic_losses = [], []
         critic_values = []
+        next_critic_values = []
+        next_critic_values_with_ent = []
         target_critic_values = []
 
         for gradient_step in range(gradient_steps):
@@ -234,23 +236,77 @@ class SAC(OffPolicyAlgorithm):
                 ent_coef_loss.backward()
                 self.ent_coef_optimizer.step()
 
+
+            ####################################################################
+            ###                       ORIGINAL LOSSES                        ###
+            ####################################################################
+
+#             with th.no_grad():
+#                 # Select action according to policy
+#                 next_actions, next_log_prob = self.actor.action_log_prob(replay_data.next_observations)
+#                 # Compute the next Q values: min over all critics targets
+#                 next_q_values = th.cat(self.critic_target(replay_data.next_observations, next_actions), dim=1)
+#                 next_q_values, _ = th.min(next_q_values, dim=1, keepdim=True)
+#                 # add entropy term
+#                 next_q_values_with_ent = next_q_values - ent_coef * next_log_prob.reshape(-1, 1)
+#                 # td error + entropy term
+#                 target_q_values = replay_data.rewards + (1 - replay_data.dones) * self.gamma * next_q_values_with_ent
+
+#             # Get current Q-values estimates for each critic network
+#             # using action from the replay buffer
+#             current_q_values = self.critic(replay_data.observations, replay_data.actions)
+
+#             # Compute critic loss
+#             critic_loss = 0.5 * sum([F.mse_loss(current_q, target_q_values) for current_q in current_q_values])
+#             critic_losses.append(critic_loss.item())
+
+            # critic_values.append(
+            #     th.min(
+            #         th.cat(current_q_values, dim=1), dim=1
+            #     )[0].mean().item()
+            # )
+
+            # next_critic_values.append(
+            #     next_q_values.mean().item()
+            # )
+
+            # next_critic_values_with_ent.append(
+            #     next_q_values_with_ent.mean().item()
+            # )
+
+            # target_critic_values.append(
+            #     target_q_values.mean().item()
+            # )
+
+            ####################################################################
+            ###                       ENSEMBLE LOSSES                        ###
+            ####################################################################
+
             with th.no_grad():
                 # Select action according to policy
                 next_actions, next_log_prob = self.actor.action_log_prob(replay_data.next_observations)
                 # Compute the next Q values: min over all critics targets
-                next_q_values = th.cat(self.critic_target(replay_data.next_observations, next_actions), dim=1)
-                next_q_values, _ = th.min(next_q_values, dim=1, keepdim=True)
+                next_q_values = self.critic_target(replay_data.next_observations, next_actions)
+                # next_q_values, _ = th.min(next_q_values, dim=1, keepdim=True)
                 # add entropy term
-                next_q_values = next_q_values - ent_coef * next_log_prob.reshape(-1, 1)
+                next_q_values_with_ent = [
+                    q - ent_coef * next_log_prob.reshape(-1, 1)
+                    for q in next_q_values
+                ]
                 # td error + entropy term
-                target_q_values = replay_data.rewards + (1 - replay_data.dones) * self.gamma * next_q_values
+                target_q_values = [
+                    replay_data.rewards + (1 - replay_data.dones) * self.gamma * q
+                    for q in next_q_values_with_ent
+                ]
 
             # Get current Q-values estimates for each critic network
             # using action from the replay buffer
             current_q_values = self.critic(replay_data.observations, replay_data.actions)
 
             # Compute critic loss
-            critic_loss = 0.5 * sum(F.mse_loss(current_q, target_q_values) for current_q in current_q_values)
+            critic_loss = th.mean(th.stack(
+                [F.mse_loss(current_q, next_q) for current_q, next_q in zip(current_q_values, target_q_values)]
+            ))
             critic_losses.append(critic_loss.item())
 
             critic_values.append(
@@ -259,8 +315,16 @@ class SAC(OffPolicyAlgorithm):
                 )[0].mean().item()
             )
 
+            next_critic_values.append(
+                th.stack(next_q_values).mean().item()
+            )
+
+            next_critic_values_with_ent.append(
+                th.stack(next_q_values_with_ent).mean().item()
+            )
+
             target_critic_values.append(
-                target_q_values.mean().item()
+                th.stack(target_q_values).mean().item()
             )
 
 
@@ -293,6 +357,8 @@ class SAC(OffPolicyAlgorithm):
         self.logger.record("train/actor_loss", np.mean(actor_losses))
         self.logger.record("train/critic_loss", np.mean(critic_losses))
         self.logger.record("train/current_q_values", np.mean(critic_values))
+        self.logger.record("train/next_q_values", np.mean(next_critic_values))
+        self.logger.record("train/next_q_values_with_ent", np.mean(next_critic_values_with_ent))
         self.logger.record("train/target_q_values", np.mean(target_critic_values))
         self.logger.record("train/buffer_size",
                            self.replay_buffer.size())
